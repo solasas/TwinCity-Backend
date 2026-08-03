@@ -35,3 +35,6 @@ build/
 ### Data import ###
 data/.venv/
 
+### Env ###
+.env
+
