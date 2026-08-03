@@ -1,0 +1,71 @@
+type Query {
+    buildings: [Building!]!
+    roads: [Road!]!
+    schools: [School!]!
+    hospitals: [Hospital!]!
+    school(id: ID!): School
+    hospital(id: ID!): Hospital
+    nearestSchool(lat: Float!, lon: Float!): School
+}
+
+type Mutation {
+    "Toggles the `open` flag on a road, simulating a closure (or reopening)."
+    simulateRoadClosure(roadId: ID!): Road!
+}
+
+"A single WGS84 coordinate."
+type GeoPoint {
+    lat: Float!
+    lon: Float!
+}
+
+type Building {
+    id: ID!
+    osmId: ID!
+    name: String
+    type: String
+    address: String
+    "Exterior ring of the building footprint polygon."
+    geometry: [GeoPoint!]!
+}
+
+type Road {
+    id: ID!
+    osmId: ID!
+    name: String
+    type: String
+    open: Boolean!
+    "Ordered points along the road centerline."
+    geometry: [GeoPoint!]!
+}
+
+type School {
+    id: ID!
+    osmId: ID!
+    name: String
+    type: String
+    address: String
+    location: GeoPoint!
+    nearbyHospitals(withinKm: Float!): [HospitalDistance!]!
+    "Only considers roads currently open (see simulateRoadClosure)."
+    nearbyRoads(withinMeters: Float!): [Road!]!
+}
+
+type Hospital {
+    id: ID!
+    osmId: ID!
+    name: String
+    type: String
+    address: String
+    location: GeoPoint!
+}
+
+"A hospital paired with its distance from the school that was queried."
+type HospitalDistance {
+    id: ID!
+    name: String
+    type: String
+    address: String
+    location: GeoPoint!
+    distanceKm: Float!
+}

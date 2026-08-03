@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: digitaltwin-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: digitaltwin
+      POSTGRES_USER: digitaltwin
+      POSTGRES_PASSWORD: digitaltwin
+    ports:
+      # Host 5433 avoids clashing with a locally-installed PostgreSQL on 5432.
+      - "5433:5432"
+    volumes:
+      - digitaltwin-db-data:/var/lib/postgresql/data
+      - ./data/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U digitaltwin -d digitaltwin"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  digitaltwin-db-data:
