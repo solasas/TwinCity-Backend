@@ -14,7 +14,7 @@ from psycopg2.extras import execute_values
 
 RAW_DIR = Path(__file__).resolve().parent.parent / "raw"
 
-DB_DSN = "host=localhost port=5433 dbname=digitaltwin user=digitaltwin password=digitaltwin"
+DB_DSN = "host=localhost port=5433 dbname=digitaltwin user=postgres password=password"
 
 ROAD_HIGHWAY_TAG = "highway"
 BUILDING_TAG = "building"

@@ -6,6 +6,8 @@ type Query {
     school(id: ID!): School
     hospital(id: ID!): Hospital
     nearestSchool(lat: Float!, lon: Float!): School
+    "Live vehicle positions from the GTFS-realtime feed, refreshed on a schedule."
+    vehicles: [Vehicle!]!
 }
 
 type Mutation {
@@ -68,4 +70,14 @@ type HospitalDistance {
     address: String
     location: GeoPoint!
     distanceKm: Float!
+}
+
+"A live transit vehicle position from the GTFS-realtime feed."
+type Vehicle {
+    id: ID!
+    route: String
+    lat: Float!
+    lng: Float!
+    "ISO-8601 timestamp of when this position was last updated by the feed."
+    lastUpdated: String!
 }
