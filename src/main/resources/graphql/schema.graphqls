@@ -8,6 +8,13 @@ type Query {
     nearestSchool(lat: Float!, lon: Float!): School
     "Live vehicle positions from the GTFS-realtime feed, refreshed on a schedule."
     vehicles: [Vehicle!]!
+    "Latest weather observation for Hoboken, populated by the Airflow `nws_weather_ingest` DAG (Phase 2.5)."
+    weather: WeatherSnapshot!
+    """
+    Rule-based congestion estimate for a road: fixed thresholds on how many currently-tracked
+    vehicles are near it. A simple heuristic, NOT a trained model — see RoadCongestionHeuristic.
+    """
+    congestionLevel(roadId: ID!): String!
 }
 
 type Mutation {
@@ -85,4 +92,23 @@ type Vehicle {
     lng: Float!
     "ISO-8601 timestamp of when this position was last updated by the feed."
     lastUpdated: String!
+}
+
+"Latest known weather conditions near Hoboken, sourced from the NWS API via the Airflow ingestion DAG."
+type WeatherSnapshot {
+    stationId: String!
+    "ISO-8601 timestamp of the observation itself — NWS stations report roughly hourly."
+    observedAt: String!
+    shortForecast: String
+    temperatureC: Float
+    dewpointC: Float
+    windDirectionDeg: Float
+    windSpeedKmh: Float
+    windGustKmh: Float
+    barometricPressurePa: Float
+    relativeHumidityPct: Float
+    visibilityM: Float
+    precipitationLastHourMm: Float
+    "ISO-8601 timestamp of when the Airflow DAG last polled this observation."
+    fetchedAt: String!
 }

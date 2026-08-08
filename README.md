@@ -14,7 +14,8 @@ OSM extract: `40.7295,-74.0435,40.7600,-74.0245` (south, west, north, east).
 - PostgreSQL 16 + PostGIS 3.4, run via Docker Compose.
 - Real OpenStreetMap data (buildings, roads, schools, hospitals), fetched from the Overpass API.
 - Spring Boot 4.1 + Spring for GraphQL, Spring Data JPA, Hibernate Spatial (JTS geometry types).
-- No Redis, no subscriptions, no auth — out of scope for this iteration.
+- Redis (vehicle store + cached queries), GraphQL subscriptions over WebSocket, Airflow (weather
+  ingestion) — added in later phases, see "Current scope" below. Still no auth (local dev demo).
 
 ## Prerequisites
 
@@ -167,7 +168,40 @@ src/main/java/.../repository/   # Spring Data JPA + native PostGIS queries
 src/main/java/.../graphql/      # @QueryMapping / @SchemaMapping / @MutationMapping controllers
 ```
 
-## Out of scope (this iteration)
+## Weather (`weather` query)
 
-No real-time feeds, no Airflow, no Redis, no GraphQL subscriptions/WebSockets, no auth, no
-AI/ML features.
+Returns the latest row from the `weather` table, populated out-of-band by the Airflow
+`nws_weather_ingest` DAG (Phase 2.5, see `airflow/dags/weather_ingest.py`) — this backend never
+calls the NWS API itself, it just reads whatever Airflow last wrote. If the DAG hasn't run yet,
+`weather` returns a GraphQL error rather than fabricating a snapshot.
+
+```graphql
+query { weather { stationId observedAt shortForecast temperatureC windSpeedKmh } }
+```
+
+## Congestion heuristic (`congestionLevel` query)
+
+```graphql
+query { congestionLevel(roadId: "585") }
+```
+
+**This is a fixed-threshold rule, not AI/ML.** `RoadCongestionHeuristic`
+(`src/main/java/.../congestion/`) counts how many currently-tracked vehicles (Phase 2.1/2.2,
+Redis-backed) are within 150m of the road's geometry and buckets the count into `LOW` / `MEDIUM`
+/ `HIGH` via fixed thresholds (`>=3` → `HIGH`, `>=1` → `MEDIUM`, else `LOW`). No model is trained,
+no weights are learned — it's a haversine distance check plus two `if`s, deliberately simple. See
+the class Javadoc for two known limitations: distance is measured to road vertices (not true
+point-to-segment), and the vehicle feed is still the MBTA placeholder from Phase 2.1 (Boston-area
+buses, ~300km from Hoboken), so in practice this reads `LOW` for nearly every road until the feed
+is swapped for one covering Hoboken/NJ.
+
+If this ever becomes an actual trained model (not currently planned), call it that explicitly —
+don't relabel this heuristic as "AI" just because it sounds more impressive.
+
+## Current scope
+
+As of Phase 2.6: PostGIS-backed core schema (iteration 1), GTFS-realtime vehicle polling (2.1),
+Redis-backed vehicle store + cached compound queries (2.2), GraphQL subscriptions over WebSocket
+(2.3), Airflow-orchestrated weather ingestion (2.5), and the `weather`/`congestionLevel` queries
+above (2.6). No auth (local dev demo throughout). No trained/learned models anywhere — every
+"smart" behavior in this codebase is either a direct data read or an explicitly-labeled heuristic.
