@@ -2,22 +2,64 @@ package com.sashank.DigitalTwinBackend.gtfs;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
- * Holds the latest known position for each vehicle, replaced wholesale on every poll.
- * A simple in-memory store for now; Phase 2.2 moves this to Redis.
+ * Holds the latest known position for each vehicle in Redis (Phase 2.2) — this is the
+ * source of truth for "latest known state", replaced wholesale on every poll.
+ *
+ * <p>Writes go to a staging key and get promoted via RENAME so a query never observes a
+ * partially-replaced set of vehicles.
  */
 @Component
 public class VehicleStore {
 
-    private volatile Map<String, Vehicle> vehiclesById = Map.of();
+    private static final String KEY = "vehicles";
+    private static final String STAGING_KEY = "vehicles:staging";
+
+    private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
+
+    public VehicleStore(StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
+    }
 
     public void replaceAll(Map<String, Vehicle> latest) {
-        vehiclesById = Map.copyOf(latest);
+        if (latest.isEmpty()) {
+            redisTemplate.delete(KEY);
+            return;
+        }
+        Map<String, String> serialized = latest.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> writeJson(e.getValue())));
+        redisTemplate.delete(STAGING_KEY);
+        redisTemplate.opsForHash().putAll(STAGING_KEY, serialized);
+        redisTemplate.rename(STAGING_KEY, KEY);
     }
 
     public List<Vehicle> findAll() {
-        return List.copyOf(vehiclesById.values());
+        return redisTemplate.<String, String>opsForHash().values(KEY).stream()
+                .map(this::readJson)
+                .toList();
+    }
+
+    private String writeJson(Vehicle vehicle) {
+        try {
+            return objectMapper.writeValueAsString(vehicle);
+        } catch (JacksonException e) {
+            throw new IllegalStateException("Failed to serialize vehicle " + vehicle.id(), e);
+        }
+    }
+
+    private Vehicle readJson(String json) {
+        try {
+            return objectMapper.readValue(json, Vehicle.class);
+        } catch (JacksonException e) {
+            throw new IllegalStateException("Failed to deserialize cached vehicle: " + json, e);
+        }
     }
 }
