@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch real OSM data for Hoboken, NJ from the Overpass API and save raw JSON.
+"""Fetch real OSM data for Rajahmundry, Andhra Pradesh, India from the Overpass API and save raw JSON.
 
 Usage: python3 fetch_osm.py
 Output: ../raw/{buildings,roads,schools,hospitals}.json
@@ -11,8 +11,13 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-# Hoboken, NJ bounding box: south, west, north, east
-BBOX = "40.7295,-74.0435,40.7600,-74.0245"
+# Rajahmundry (Rajamahendravaram), Andhra Pradesh bounding box: south, west, north, east.
+# Covers the main town, bus stand area, Government Hospital, Innespeta, Danavaipeta, and the
+# riverside area near the Godavari. Verified via Overpass count query before adopting this box:
+# 13,237 buildings, 2,534 roads, 19 schools, 222 hospitals/clinics — comparably or more dense
+# than the previous (Hoboken) bounding box, so no widening toward Kadiam or the railway station
+# was needed.
+BBOX = "16.975,81.765,17.020,81.825"
 
 MIRRORS = [
     "https://overpass-api.de/api/interpreter",
@@ -34,6 +39,11 @@ QUERIES = {
 RAW_DIR = Path(__file__).resolve().parent.parent / "raw"
 
 
+# Overpass instances reject requests with no/generic User-Agent (406 Not Acceptable) —
+# confirmed live: identical request succeeds with this header, fails without it.
+USER_AGENT = "DigitalTwinBackend-fetch_osm/1.0 (contact: solasa.dev@gmail.com)"
+
+
 def fetch(query: str, attempts_per_mirror: int = 2, backoff: float = 5.0) -> dict:
     last_err = None
     body = urllib.parse.urlencode({"data": query}).encode("utf-8")
@@ -41,7 +51,8 @@ def fetch(query: str, attempts_per_mirror: int = 2, backoff: float = 5.0) -> dic
         for attempt in range(1, attempts_per_mirror + 1):
             try:
                 print(f"  trying {mirror} (attempt {attempt})...")
-                req = urllib.request.Request(mirror, data=body, method="POST")
+                req = urllib.request.Request(mirror, data=body, method="POST",
+                                              headers={"User-Agent": USER_AGENT})
                 with urllib.request.urlopen(req, timeout=190) as resp:
                     raw = resp.read()
                     data = json.loads(raw)

@@ -9,6 +9,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -16,8 +17,14 @@ import org.springframework.web.client.RestClient;
 /**
  * Polls a GTFS-realtime VehiclePositions feed on a fixed interval and refreshes
  * {@link VehicleStore} with the latest snapshot.
+ *
+ * <p>Disabled by default — Rajahmundry has no real GTFS-realtime feed to point this at, so
+ * {@code SimulatedVehiclePoller} is active instead (see {@code vehicle-feed.simulated}). Left
+ * working rather than deleted: set {@code vehicle-feed.simulated=false} and configure
+ * {@code GTFS_VEHICLE_POSITIONS_URL} to use this against a city that actually has a feed.
  */
 @Component
+@ConditionalOnProperty(name = "vehicle-feed.simulated", havingValue = "false")
 public class GtfsRealtimePoller {
 
     private static final Logger log = LoggerFactory.getLogger(GtfsRealtimePoller.class);

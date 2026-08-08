@@ -8,7 +8,7 @@ type Query {
     nearestSchool(lat: Float!, lon: Float!): School
     "Live vehicle positions from the GTFS-realtime feed, refreshed on a schedule."
     vehicles: [Vehicle!]!
-    "Latest weather observation for Hoboken, populated by the Airflow `nws_weather_ingest` DAG (Phase 2.5)."
+    "Latest weather observation for Rajahmundry, populated by the Airflow `nws_weather_ingest` DAG (Phase 2.5)."
     weather: WeatherSnapshot!
     """
     Rule-based congestion estimate for a road: fixed thresholds on how many currently-tracked
@@ -94,7 +94,7 @@ type Vehicle {
     lastUpdated: String!
 }
 
-"Latest known weather conditions near Hoboken, sourced from the NWS API via the Airflow ingestion DAG."
+"Latest known weather conditions near Rajahmundry, sourced from Open-Meteo via the Airflow ingestion DAG."
 type WeatherSnapshot {
     stationId: String!
     "ISO-8601 timestamp of the observation itself — NWS stations report roughly hourly."

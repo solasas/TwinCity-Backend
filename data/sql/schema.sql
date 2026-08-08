@@ -1,5 +1,5 @@
 -- Digital Twin of a City — iteration 1 schema
--- Neighborhood: Hoboken, NJ, USA
+-- Neighborhood: Rajahmundry (Rajamahendravaram), Andhra Pradesh, India
 -- Loaded automatically by docker-compose (mounted into /docker-entrypoint-initdb.d)
 
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -44,8 +44,9 @@ CREATE TABLE IF NOT EXISTS hospitals (
 );
 CREATE INDEX IF NOT EXISTS idx_hospitals_geom ON hospitals USING GIST (geom);
 
--- Phase 2.5: populated by the Airflow `nws_weather_ingest` DAG (data/../airflow/dags), polling the
--- NWS API every ~12 min for the station nearest Hoboken. Not yet exposed via GraphQL (Phase 2.6).
+-- Phase 2.5: populated by the Airflow `nws_weather_ingest` DAG (data/../airflow/dags), polling
+-- Open-Meteo every ~12 min for Rajahmundry (originally NWS/Hoboken — NWS doesn't cover non-US
+-- points). Exposed via GraphQL as of Phase 2.6.
 CREATE TABLE IF NOT EXISTS weather (
     id BIGSERIAL PRIMARY KEY,
     station_id TEXT NOT NULL,

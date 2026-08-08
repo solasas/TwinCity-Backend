@@ -5,9 +5,13 @@ this API over HTTP. It does not exist in this repo.
 
 ## Neighborhood
 
-**Hoboken, NJ, USA** — a compact (~3.3 km²), walkable city with a regular street grid, a real
-hospital (Hoboken University Medical Center), and multiple schools. Bounding box used for the
-OSM extract: `40.7295,-74.0435,40.7600,-74.0245` (south, west, north, east).
+**Rajahmundry (Rajamahendravaram), Andhra Pradesh, India** — covers the main town, bus stand
+area, Government Hospital area, Innespeta, Danavaipeta, and the riverside area near the Godavari.
+Bounding box used for the OSM extract: `16.975,81.765,17.020,81.825` (south, west, north, east).
+Originally Hoboken, NJ (iteration 1 / Phase 2.1–2.5) — migrated to Rajahmundry without touching
+the schema, GraphQL contract, or Phase 2 infrastructure (transit polling, Redis, subscriptions,
+Airflow orchestration); only the data source and city-specific constants changed. See "Migration
+notes" below for what that involved.
 
 ## Stack
 
@@ -57,7 +61,9 @@ python3 -m venv .venv
 .venv/bin/python scripts/import_osm.py
 ```
 
-Expected row counts for Hoboken: ~6,200 buildings, ~1,400 roads, ~20 schools, 1 hospital.
+Expected row counts for Rajahmundry: ~13,200 buildings, ~2,500 roads, ~19 schools, ~220
+hospitals/clinics (OSM tags many small private clinics as `amenity=hospital` in this area — not
+a data-quality bug, just denser real-world tagging than Hoboken's single hospital).
 
 ## 3. Run the Spring Boot app
 
@@ -102,14 +108,14 @@ These map directly onto `RoadRepository`, `SchoolRepository`, and `HospitalRepos
 
 ```graphql
 query {
-  school(id: "3") {
+  school(id: "1") {
     name
     location { lat lon }
-    nearbyHospitals(withinKm: 5) {
+    nearbyHospitals(withinKm: 1) {
       name
       distanceKm
     }
-    nearbyRoads(withinMeters: 200) {
+    nearbyRoads(withinMeters: 300) {
       name
       open
     }
@@ -123,14 +129,14 @@ Expected response shape:
 {
   "data": {
     "school": {
-      "name": "Stevens Cooperative School",
-      "location": { "lat": 40.7406745, "lon": -74.0275376 },
+      "name": "RAVINDRA BHARATHI SCHOOL",
+      "location": { "lat": 17.0072333, "lon": 81.7984452 },
       "nearbyHospitals": [
-        { "name": "Hoboken University Medical Center", "distanceKm": 0.55 }
+        { "name": "Dr.vijaya Eye Hospital", "distanceKm": 0.32 }
       ],
       "nearbyRoads": [
-        { "name": "River Street", "open": true },
-        { "name": "4th Street", "open": true }
+        { "name": "Jawaharlal Nehru Road", "open": true },
+        { "name": "happy street", "open": true }
       ]
     }
   }
@@ -141,7 +147,7 @@ Expected response shape:
 
 ```graphql
 mutation {
-  simulateRoadClosure(roadId: "585") {
+  simulateRoadClosure(roadId: "135") {
     id
     name
     open
@@ -172,36 +178,107 @@ src/main/java/.../graphql/      # @QueryMapping / @SchemaMapping / @MutationMapp
 
 Returns the latest row from the `weather` table, populated out-of-band by the Airflow
 `nws_weather_ingest` DAG (Phase 2.5, see `airflow/dags/weather_ingest.py`) — this backend never
-calls the NWS API itself, it just reads whatever Airflow last wrote. If the DAG hasn't run yet,
-`weather` returns a GraphQL error rather than fabricating a snapshot.
+calls the weather API itself, it just reads whatever Airflow last wrote. If the DAG hasn't run
+yet, `weather` returns a GraphQL error rather than fabricating a snapshot.
+
+The DAG originally called the US National Weather Service API. NWS only covers US coordinates —
+it returns a hard 404 for Rajahmundry — so the migration swapped it for
+[Open-Meteo](https://open-meteo.com/) (free, no API key, worldwide coverage). Same schedule
+(~12 min), same table, same retry policy; only the external call and field mapping changed.
 
 ```graphql
 query { weather { stationId observedAt shortForecast temperatureC windSpeedKmh } }
 ```
 
+## Vehicle feed (`vehicles` query, `vehicleUpdates` subscription)
+
+**Simulated vehicle feed standing in for a real GTFS source, since Rajahmundry does not
+currently publish one.** Checked before building this: no public GTFS-realtime feed exists for
+APSRTC or Rajahmundry specifically — the only discoverable GTFS-shaped data for APSRTC is an
+*expired, static* (schedule-only, no live positions) feed via a third-party aggregator, and
+APSRTC's actual live bus tracking ("APSRTC LIVE TRACK") is a closed mobile app with no
+documented public API. This is an honest substitution for a portfolio project, not something to
+hide: `SimulatedVehiclePoller` (`src/main/java/.../simulation/`) generates ~10 buses/autos that
+move back and forth along **real** imported road geometries (excluding `service`/`pedestrian`
+ways — not realistic bus/auto routes), at the same poll cadence a real feed would use.
+
+Nothing downstream knows or cares that the feed is simulated: it writes into `VehicleStore` via
+the exact same `replaceAll(...)` call the original `GtfsRealtimePoller` (Phase 2.1) used, so
+Redis storage, change-diffing, pub/sub, and the `vehicles`/`vehicleUpdates` GraphQL surface are
+byte-for-byte unchanged. `GtfsRealtimePoller` itself is still in the codebase, just disabled
+(`vehicle-feed.simulated=false` to re-enable it against a real feed, e.g. for a different city —
+`GTFS_VEHICLE_POSITIONS_URL` still defaults to MBTA's public feed from Phase 2.1).
+
+```graphql
+query { vehicles { id route lat lng lastUpdated } }
+subscription { vehicleUpdates { id route lat lng lastUpdated } }
+```
+
 ## Congestion heuristic (`congestionLevel` query)
 
 ```graphql
-query { congestionLevel(roadId: "585") }
+query { congestionLevel(roadId: "135") }
 ```
 
 **This is a fixed-threshold rule, not AI/ML.** `RoadCongestionHeuristic`
-(`src/main/java/.../congestion/`) counts how many currently-tracked vehicles (Phase 2.1/2.2,
-Redis-backed) are within 150m of the road's geometry and buckets the count into `LOW` / `MEDIUM`
-/ `HIGH` via fixed thresholds (`>=3` → `HIGH`, `>=1` → `MEDIUM`, else `LOW`). No model is trained,
-no weights are learned — it's a haversine distance check plus two `if`s, deliberately simple. See
-the class Javadoc for two known limitations: distance is measured to road vertices (not true
-point-to-segment), and the vehicle feed is still the MBTA placeholder from Phase 2.1 (Boston-area
-buses, ~300km from Hoboken), so in practice this reads `LOW` for nearly every road until the feed
-is swapped for one covering Hoboken/NJ.
+(`src/main/java/.../congestion/`) counts how many currently-tracked vehicles are within 150m of
+the road's geometry and buckets the count into `LOW` / `MEDIUM` / `HIGH` via fixed thresholds
+(`>=3` → `HIGH`, `>=1` → `MEDIUM`, else `LOW`). No model is trained, no weights are learned — it's
+a haversine distance check plus two `if`s, deliberately simple. One known limitation: distance is
+measured to road vertices, not true point-to-segment distance, so a vehicle mid-way along an
+unusually long, sparse segment could be missed.
+
+Unlike the original Hoboken/MBTA mismatch (where the vehicle feed was ~300km from the roads it
+was supposedly near), the simulated feed above moves along the *same* real road network this
+heuristic checks against, so `MEDIUM`/`HIGH` readings are now actually geographically meaningful
+here rather than permanently reading `LOW`.
 
 If this ever becomes an actual trained model (not currently planned), call it that explicitly —
 don't relabel this heuristic as "AI" just because it sounds more impressive.
 
+## Migration notes (Hoboken → Rajahmundry)
+
+The neighborhood changed from Hoboken, NJ to Rajahmundry, Andhra Pradesh, India without touching
+the schema, GraphQL contract, or Phase 2 infrastructure. What actually changed:
+
+- **Bounding box** (`data/scripts/fetch_osm.py`): swapped to `16.975,81.765,17.020,81.825`.
+  Verified via an Overpass count query before adopting it — 13,237 buildings, 2,534 roads, 19
+  schools, 222 hospitals/clinics, comparably or more dense than the Hoboken box — so no widening
+  toward Kadiam or the railway station was needed.
+- **`fetch_osm.py` bug fix, unrelated to the city change**: Overpass mirrors return `406 Not
+  Acceptable` for requests with no/generic `User-Agent` (confirmed live — identical request
+  succeeds with one, fails without). This silently worked before only because the Hoboken raw
+  JSON was already cached in `data/raw/`; a fresh fetch for Rajahmundry exposed it. Fixed by
+  adding an explicit `User-Agent` header.
+- **Data reload**: `data/raw/*.json` deleted and re-fetched (the script skips fetching if those
+  files already exist). `buildings`/`roads`/`schools`/`hospitals` were `TRUNCATE`d before
+  re-importing — `import_osm.py` only upserts by `osm_id`, and Hoboken/Rajahmundry `osm_id`s never
+  collide, so without truncating first the two cities' data would sit mixed together in the same
+  tables. `weather` was also truncated, clearing stale Hoboken observations for a clean cutover.
+- **Weather DAG** (`airflow/dags/weather_ingest.py`): NWS only covers US coordinates — confirmed
+  a hard 404 for Rajahmundry — so swapped to Open-Meteo (OpenWeather/Tomorrow.io were considered
+  but both need an API key; Open-Meteo doesn't). See the "Weather" section above. Coordinates
+  point at 17.0005°N, 81.8040°E.
+- **Vehicle feed**: replaced with a simulation (`SimulatedVehiclePoller`) — Rajahmundry has no
+  real GTFS-realtime feed to point the original poller at. See the "Vehicle feed" section above
+  for what was checked and why. The original `GtfsRealtimePoller` is disabled, not deleted.
+- **Doc-comments only** (no logic/schema change): `schema.sql` header, `schema.graphqls`
+  descriptions, `RoadCongestionHeuristic`'s Javadoc — updated to reference Rajahmundry instead of
+  Hoboken, and to stop claiming NWS as the weather source.
+- **Frontend**: `VITE_MAP_CENTER_LAT`/`VITE_MAP_CENTER_LNG` (and their hardcoded fallback
+  defaults, which were actually stale San Francisco coordinates, not even Hoboken) updated
+  separately in the frontend repo — no API-contract or component changes needed there.
+- **Known OSM data gap**: no POI in this Overpass extract is tagged `amenity=hospital` with a
+  name containing "Government" — Rajahmundry's Government Hospital doesn't appear to be tagged
+  that way in current OSM data for this area. Not something a bounding-box or query change can
+  fix; it's a gap in OSM's tagging, not in this import.
+
 ## Current scope
 
-As of Phase 2.6: PostGIS-backed core schema (iteration 1), GTFS-realtime vehicle polling (2.1),
-Redis-backed vehicle store + cached compound queries (2.2), GraphQL subscriptions over WebSocket
-(2.3), Airflow-orchestrated weather ingestion (2.5), and the `weather`/`congestionLevel` queries
-above (2.6). No auth (local dev demo throughout). No trained/learned models anywhere — every
-"smart" behavior in this codebase is either a direct data read or an explicitly-labeled heuristic.
+As of the Rajahmundry migration: PostGIS-backed core schema (iteration 1), vehicle polling —
+simulated by default, real GTFS-realtime capability retained but disabled (2.1), Redis-backed
+vehicle store + cached compound queries (2.2), GraphQL subscriptions over WebSocket (2.3),
+Airflow-orchestrated weather ingestion via Open-Meteo (2.5), and the `weather`/`congestionLevel`
+queries (2.6). No auth (local dev demo throughout). No trained/learned models anywhere — every
+"smart" behavior in this codebase is either a direct data read, an explicitly-labeled heuristic,
+or an explicitly-labeled simulation.
