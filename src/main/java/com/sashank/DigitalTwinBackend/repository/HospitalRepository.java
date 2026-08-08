@@ -22,4 +22,19 @@ public interface HospitalRepository extends JpaRepository<Hospital, Long> {
             ORDER BY distanceKm
             """, nativeQuery = true)
     List<HospitalDistanceRow> findNearHospitalsForSchool(@Param("schoolId") Long schoolId, @Param("withinKm") double withinKm);
+
+    @Query(value = """
+            SELECT h.id AS id,
+                   h.name AS name,
+                   h.type AS type,
+                   h.address AS address,
+                   ST_Y(h.geom) AS lat,
+                   ST_X(h.geom) AS lon,
+                   ST_Distance(h.geom::geography, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography) / 1000.0 AS distanceKm
+            FROM hospitals h
+            WHERE ST_DWithin(h.geom::geography, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography, :radiusKm * 1000)
+            ORDER BY distanceKm
+            """, nativeQuery = true)
+    List<HospitalDistanceRow> findNearPoint(@Param("lat") double lat, @Param("lon") double lon,
+            @Param("radiusKm") double radiusKm);
 }
