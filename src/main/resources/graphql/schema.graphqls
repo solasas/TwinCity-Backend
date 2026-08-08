@@ -15,6 +15,11 @@ type Mutation {
     simulateRoadClosure(roadId: ID!): Road!
 }
 
+type Subscription {
+    "Streams a vehicle each time its position changes. Call `vehicles` first for the initial snapshot."
+    vehicleUpdates: Vehicle!
+}
+
 "A single WGS84 coordinate."
 type GeoPoint {
     lat: Float!

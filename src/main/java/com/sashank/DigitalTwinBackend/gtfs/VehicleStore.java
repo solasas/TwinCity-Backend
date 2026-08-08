@@ -1,5 +1,6 @@
 package com.sashank.DigitalTwinBackend.gtfs;
 
+import com.sashank.DigitalTwinBackend.realtime.VehicleUpdatesChannel;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -13,7 +14,8 @@ import tools.jackson.databind.ObjectMapper;
  * source of truth for "latest known state", replaced wholesale on every poll.
  *
  * <p>Writes go to a staging key and get promoted via RENAME so a query never observes a
- * partially-replaced set of vehicles.
+ * partially-replaced set of vehicles. Vehicles whose position actually changed (new or moved)
+ * are published on {@link VehicleUpdatesChannel#NAME} for the {@code vehicleUpdates} subscription.
  */
 @Component
 public class VehicleStore {
@@ -30,6 +32,8 @@ public class VehicleStore {
     }
 
     public void replaceAll(Map<String, Vehicle> latest) {
+        Map<String, Vehicle> previous = findAllById();
+
         if (latest.isEmpty()) {
             redisTemplate.delete(KEY);
             return;
@@ -39,12 +43,29 @@ public class VehicleStore {
         redisTemplate.delete(STAGING_KEY);
         redisTemplate.opsForHash().putAll(STAGING_KEY, serialized);
         redisTemplate.rename(STAGING_KEY, KEY);
+
+        publishChanges(previous, latest);
     }
 
     public List<Vehicle> findAll() {
-        return redisTemplate.<String, String>opsForHash().values(KEY).stream()
-                .map(this::readJson)
-                .toList();
+        return findAllById().values().stream().toList();
+    }
+
+    private Map<String, Vehicle> findAllById() {
+        return redisTemplate.<String, String>opsForHash().entries(KEY).entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> readJson(e.getValue())));
+    }
+
+    private void publishChanges(Map<String, Vehicle> previous, Map<String, Vehicle> latest) {
+        for (Vehicle vehicle : latest.values()) {
+            Vehicle before = previous.get(vehicle.id());
+            boolean positionChanged = before == null
+                    || before.lat() != vehicle.lat()
+                    || before.lng() != vehicle.lng();
+            if (positionChanged) {
+                redisTemplate.convertAndSend(VehicleUpdatesChannel.NAME, writeJson(vehicle));
+            }
+        }
     }
 
     private String writeJson(Vehicle vehicle) {
